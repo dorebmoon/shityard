@@ -1,0 +1,62 @@
+version: '2'
+
+services:  
+    discovery:
+        image: microbox/etcd
+        ports:
+            - "10.10.3.67:4001:4001"
+            - "10.10.3.67:7001:7001"
+        command: -name discovery
+
+    rethinkdb:
+        image: rethinkdb
+        restart: always
+          
+    proxy:
+        image: shipyard/docker-proxy
+        ports:
+            - "10.10.3.67:2376:2376"
+        restart: always
+        hostname: docker
+        environment:
+            PORT: 2376
+        volumes:
+           - "/var/run/docker.sock:/var/run/docker.sock"
+
+    swarm-manager:
+        image: swarm
+        restart: always
+        ports:
+          - 10.10.3.67:3375:3375        
+        links:
+            - discovery
+        command: manage --host tcp://0.0.0.0:3375 etcd://10.10.3.67:4001
+        depends_on:
+            - discovery
+
+    swarm-agent:
+        image: swarm
+        restart: always
+        links:
+            - discovery
+            - proxy
+            - swarm-manager
+        command: join --addr 10.10.3.67:2376  etcd://10.10.3.67:4001
+        depends_on:
+            - discovery
+            - swarm-manager
+
+    shipyard:
+        image: shipyard/shipyard
+        restart: always
+        ports:
+            - "80:80"
+        links:
+            - rethinkdb
+            - swarm-manager:swarm
+        command: server -l 0.0.0.0:80 -d tcp://swarm:3375
+        depends_on:
+            - rethinkdb
+            - proxy
+            - swarm-manager
+            - swarm-agent
